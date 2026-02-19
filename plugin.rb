@@ -2,7 +2,7 @@
 
 # name: discourse-content-redirector
 # about: Provides /content?u=... which decodes urlsafe-base64 and redirects. Optional external logging to a PHP endpoint.
-# version: 0.3
+# version: 0.3.1
 # authors: you
 
 enabled_site_setting :content_redirector_enabled
@@ -22,7 +22,9 @@ after_initialize do
     MAX_PARAM_LEN = 4096
 
     # Only these params are extracted from destination URL querystring:
-    EXTRACT_KEYS = %w[sub_aff1 sub_aff2 subid subid2].freeze
+    # NEW: aff_sub1/aff_sub2
+    # Still supports sub_aff1/sub_aff2 as backward-compat mapping (optional)
+    EXTRACT_KEYS = %w[aff_sub1 aff_sub2 subid subid2 sub_aff1 sub_aff2].freeze
 
     def self.decode_urlsafe_base64(s)
       return nil if s.blank?
@@ -70,12 +72,21 @@ after_initialize do
       out = {}
       return out if uri.nil? || uri.query.blank?
 
-      # Rack is available in Rails; parses querystring safely
       parsed = Rack::Utils.parse_nested_query(uri.query) rescue {}
+
       EXTRACT_KEYS.each do |k|
         v = parsed[k]
         out[k] = v.to_s if v.present?
       end
+
+      # Backward-compat: if old params exist but new ones don't, map them
+      if out["aff_sub1"].blank? && out["sub_aff1"].present?
+        out["aff_sub1"] = out["sub_aff1"]
+      end
+      if out["aff_sub2"].blank? && out["sub_aff2"].present?
+        out["aff_sub2"] = out["sub_aff2"]
+      end
+
       out
     end
   end
@@ -162,8 +173,8 @@ after_initialize do
           dest_url: url,
 
           # extracted affiliate params from DESTINATION url
-          sub_aff1: extracted["sub_aff1"],
-          sub_aff2: extracted["sub_aff2"],
+          aff_sub1: extracted["aff_sub1"],
+          aff_sub2: extracted["aff_sub2"],
           subid:    extracted["subid"],
           subid2:   extracted["subid2"],
 
