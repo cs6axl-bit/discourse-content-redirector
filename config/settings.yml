@@ -1,0 +1,23 @@
+# config/settings.yml
+plugins:
+  # Master switch (replaces the old constant ENABLED usage)
+  content_redirector_enabled:
+    default: true
+    client: false
+
+  # NEW: external logging
+  content_redirector_external_log_enabled:
+    default: false
+    client: false
+
+  # NEW: where to POST JSON logs (your PHP endpoint)
+  content_redirector_external_log_endpoint:
+    default: ""
+    client: false
+
+  # Optional: keep the log call snappy (ms)
+  content_redirector_external_log_timeout_ms:
+    default: 1500
+    min: 100
+    max: 10000
+    client: false
