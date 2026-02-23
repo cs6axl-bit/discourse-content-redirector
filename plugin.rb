@@ -2,7 +2,7 @@
 
 # name: discourse-content-redirector
 # about: Provides /content?u=... which decodes urlsafe-base64 and redirects. Optional external logging to a PHP endpoint.
-# version: 0.3.1
+# version: 0.4.0
 # authors: you
 
 enabled_site_setting :content_redirector_enabled
@@ -14,6 +14,7 @@ after_initialize do
   require "json"
   require "securerandom"
   require "time"
+  require "erb"
 
   module ::ContentRedirector
     PLUGIN_NAME = "discourse-content-redirector"
@@ -188,7 +189,64 @@ after_initialize do
         Jobs.enqueue(:content_redirector_external_log, payload: payload)
       end
 
-      redirect_to url, allow_other_host: true, status: 302
+      # ---------------------------
+      # Redirect (HTTP 30x vs JS)
+      # ---------------------------
+      mode = SiteSetting.content_redirector_redirect_mode.to_s rescue "http"
+
+      if mode == "js"
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+
+        # Required sentence (exact text you provided)
+        message = "Ask questions, share experiences, and learn from each other about medical topics, health management, wellness, treatments, and everyday healthy living."
+
+        html = <<~HTML
+          <!doctype html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <meta http-equiv="Cache-Control" content="no-store" />
+              <meta http-equiv="Pragma" content="no-cache" />
+              <meta http-equiv="Expires" content="0" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <meta name="referrer" content="no-referrer-when-downgrade">
+              <title>Loading</title>
+              <style>
+                body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+                .wrap { max-width: 900px; margin: 0 auto; padding: 28px 18px; }
+                .card { border: 1px solid rgba(0,0,0,0.12); border-radius: 12px; padding: 20px; }
+                .msg { font-size: 18px; line-height: 1.5; }
+              </style>
+            </head>
+            <body>
+              <div class="wrap">
+                <div class="card">
+                  <div class="msg">#{ERB::Util.html_escape(message)}</div>
+                </div>
+              </div>
+
+              <noscript>
+                <meta http-equiv="refresh" content="0;url=#{ERB::Util.html_escape(url)}">
+              </noscript>
+
+              <script>
+                (function() {
+                  var u = #{url.to_json};
+                  try { window.location.replace(u); }
+                  catch(e) { window.location.href = u; }
+                })();
+              </script>
+            </body>
+          </html>
+        HTML
+
+        return render html: html.html_safe
+      end
+
+      status = (SiteSetting.content_redirector_http_status.to_i rescue 302)
+      status = 302 unless (300..399).include?(status)
+
+      redirect_to url, allow_other_host: true, status: status
     rescue => e
       Rails.logger.warn("[#{::ContentRedirector::PLUGIN_NAME}] controller error: #{e.class}: #{e.message}")
       render(plain: "error", status: 500)
