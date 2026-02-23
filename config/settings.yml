@@ -21,3 +21,19 @@ plugins:
     min: 100
     max: 10000
     client: false
+
+
+  content_redirector_redirect_mode:
+    default: "http"
+    type: enum
+    choices:
+      - http
+      - js
+    client: true
+
+  content_redirector_http_status:
+    default: 302
+    type: integer
+    min: 300
+    max: 399
+    client: false
