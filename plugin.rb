@@ -2,7 +2,7 @@
 
 # name: discourse-content-redirector
 # about: Provides /content?u=... which decodes urlsafe-base64 and redirects. Optional external logging to a PHP endpoint.
-# version: 0.4.0
+# version: 0.5.0
 # authors: you
 
 enabled_site_setting :content_redirector_enabled
@@ -23,8 +23,6 @@ after_initialize do
     MAX_PARAM_LEN = 4096
 
     # Only these params are extracted from destination URL querystring:
-    # NEW: aff_sub1/aff_sub2
-    # Still supports sub_aff1/sub_aff2 as backward-compat mapping (optional)
     EXTRACT_KEYS = %w[aff_sub1 aff_sub2 subid subid2 sub_aff1 sub_aff2].freeze
 
     def self.decode_urlsafe_base64(s)
@@ -89,6 +87,20 @@ after_initialize do
       end
 
       out
+    end
+
+    # Redirect mode:
+    # - "http" => standard HTTP 30x redirect
+    # - "meta" => render HTML page with META refresh (no JS)
+    #
+    # Backward-compat: if old value "js" is still stored, treat it as "meta".
+    def self.redirect_mode
+      v = (SiteSetting.content_redirector_redirect_mode.to_s rescue "http").strip.downcase
+      v = "meta" if v == "js"
+      v = "http" if v.blank?
+      v
+    rescue
+      "http"
     end
   end
 
@@ -163,7 +175,6 @@ after_initialize do
       if ::ContentRedirector.external_log_enabled?
         extracted = ::ContentRedirector.extract_tracking_params(uri)
 
-        # best-effort client IPs
         xff = request.headers["X-Forwarded-For"].to_s
         real_ip = request.headers["X-Real-IP"].to_s
 
@@ -190,15 +201,17 @@ after_initialize do
       end
 
       # ---------------------------
-      # Redirect (HTTP 30x vs JS)
+      # Redirect: HTTP 30x vs META refresh page (NO JS)
       # ---------------------------
-      mode = SiteSetting.content_redirector_redirect_mode.to_s rescue "http"
+      mode = ::ContentRedirector.redirect_mode
 
-      if mode == "js"
+      if mode == "meta"
         response.headers["Content-Type"] = "text/html; charset=utf-8"
 
-        # Required sentence (exact text you provided)
         message = "Ask questions, share experiences, and learn from each other about medical topics, health management, wellness, treatments, and everyday healthy living."
+
+        escaped_url_for_meta = ERB::Util.html_escape(url)
+        escaped_message = ERB::Util.html_escape(message)
 
         html = <<~HTML
           <!doctype html>
@@ -210,32 +223,27 @@ after_initialize do
               <meta http-equiv="Expires" content="0" />
               <meta name="viewport" content="width=device-width, initial-scale=1" />
               <meta name="referrer" content="no-referrer-when-downgrade">
+              <meta http-equiv="refresh" content="0;url=#{escaped_url_for_meta}">
               <title>Loading</title>
               <style>
                 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
                 .wrap { max-width: 900px; margin: 0 auto; padding: 28px 18px; }
                 .card { border: 1px solid rgba(0,0,0,0.12); border-radius: 12px; padding: 20px; }
                 .msg { font-size: 18px; line-height: 1.5; }
+                .link { margin-top: 14px; font-size: 16px; }
+                .link a { word-break: break-word; }
               </style>
             </head>
             <body>
               <div class="wrap">
                 <div class="card">
-                  <div class="msg">#{ERB::Util.html_escape(message)}</div>
+                  <div class="msg">#{escaped_message}</div>
+                  <div class="link">
+                    If you are not redirected automatically,
+                    <a href="#{escaped_url_for_meta}" rel="nofollow noopener">click here to continue</a>.
+                  </div>
                 </div>
               </div>
-
-              <noscript>
-                <meta http-equiv="refresh" content="0;url=#{ERB::Util.html_escape(url)}">
-              </noscript>
-
-              <script>
-                (function() {
-                  var u = #{url.to_json};
-                  try { window.location.replace(u); }
-                  catch(e) { window.location.href = u; }
-                })();
-              </script>
             </body>
           </html>
         HTML
