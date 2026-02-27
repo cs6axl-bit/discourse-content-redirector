@@ -1,39 +1,37 @@
-# config/settings.yml
 plugins:
-  # Master switch (replaces the old constant ENABLED usage)
   content_redirector_enabled:
     default: true
     client: false
 
-  # NEW: external logging
+  # "http" => standard 30x redirect
+  # "meta" => HTML page with META refresh (no JS)
+  content_redirector_redirect_mode:
+    default: "http"
+    client: false
+    type: enum
+    choices:
+      - "http"
+      - "meta"
+
+  # Used only when redirect_mode = "http"
+  # Allowed 300-399, otherwise code falls back to 302
+  content_redirector_http_status:
+    default: 302
+    client: false
+    type: integer
+
   content_redirector_external_log_enabled:
     default: false
     client: false
 
-  # NEW: where to POST JSON logs (your PHP endpoint)
+  # Example: https://yourdomain.com/logs/content_redirect_log.php
   content_redirector_external_log_endpoint:
     default: ""
     client: false
+    type: text
 
-  # Optional: keep the log call snappy (ms)
+  # Timeout for external log POST request
   content_redirector_external_log_timeout_ms:
     default: 1500
-    min: 100
-    max: 10000
     client: false
-
-
-  content_redirector_redirect_mode:
-    default: "http"
-    type: enum
-    choices:
-      - http
-      - js
-    client: true
-
-  content_redirector_http_status:
-    default: 302
     type: integer
-    min: 300
-    max: 399
-    client: false
