@@ -2,7 +2,7 @@
 
 # name: discourse-content-redirector
 # about: Provides /content?u=... which decodes urlsafe-base64 and redirects. Optional external logging to a PHP endpoint.
-# version: 0.5.0
+# version: 0.6.1
 # authors: you
 
 enabled_site_setting :content_redirector_enabled
@@ -44,6 +44,11 @@ after_initialize do
       decoded
     rescue
       nil
+    end
+
+    def self.truthy_param?(v)
+      s = v.to_s.strip.downcase
+      s == "1" || s == "true" || s == "yes" || s == "y" || s == "on"
     end
 
     def self.external_log_enabled?
@@ -102,6 +107,18 @@ after_initialize do
     rescue
       "http"
     end
+
+    def self.meta_second_hop_enabled?
+      !!SiteSetting.content_redirector_meta_second_hop_enabled
+    rescue
+      false
+    end
+
+    def self.meta_show_manual_link?
+      !!SiteSetting.content_redirector_meta_show_manual_link
+    rescue
+      true
+    end
   end
 
   class ::ContentRedirector::Engine < ::Rails::Engine
@@ -146,6 +163,10 @@ after_initialize do
     def content
       return render(plain: "disabled", status: 404) unless SiteSetting.content_redirector_enabled
 
+      # If doredir=1, we ALWAYS do HTTP 30x redirect to the destination (no meta page),
+      # even if redirect_mode is "meta". This is the "second hop" target.
+      do_redirect = ::ContentRedirector.truthy_param?(params[:doredir])
+
       url = ::ContentRedirector.decode_urlsafe_base64(params[:u])
       return render(plain: "missing/invalid", status: 400) if url.blank?
 
@@ -171,8 +192,19 @@ after_initialize do
 
       # ---------------------------
       # Optional external logging
+      #
+      # NEW RULE:
+      # - If 2-hop is ENABLED => log ONLY when doredir=1
+      # - If 2-hop is DISABLED => log on the normal hit (as before)
       # ---------------------------
-      if ::ContentRedirector.external_log_enabled?
+      should_log =
+        if ::ContentRedirector.meta_second_hop_enabled?
+          do_redirect
+        else
+          true
+        end
+
+      if should_log && ::ContentRedirector.external_log_enabled?
         extracted = ::ContentRedirector.extract_tracking_params(uri)
 
         xff = request.headers["X-Forwarded-For"].to_s
@@ -190,6 +222,10 @@ after_initialize do
           subid:    extracted["subid"],
           subid2:   extracted["subid2"],
 
+          # helpful for debugging/deduping
+          hop_mode: (::ContentRedirector.meta_second_hop_enabled? ? "2hop" : "direct"),
+          doredir: (do_redirect ? 1 : 0),
+
           # client data
           ip: (request.remote_ip rescue nil),
           x_forwarded_for: (xff.present? ? xff : nil),
@@ -200,18 +236,47 @@ after_initialize do
         Jobs.enqueue(:content_redirector_external_log, payload: payload)
       end
 
+      # If doredir=1 => always do HTTP redirect to the destination
+      if do_redirect
+        status = (SiteSetting.content_redirector_http_status.to_i rescue 302)
+        status = 302 unless (300..399).include?(status)
+        return redirect_to url, allow_other_host: true, status: status
+      end
+
       # ---------------------------
       # Redirect: HTTP 30x vs META refresh page (NO JS)
       # ---------------------------
       mode = ::ContentRedirector.redirect_mode
-
       if mode == "meta"
         response.headers["Content-Type"] = "text/html; charset=utf-8"
 
         message = "Ask questions, share experiences, and learn from each other about medical topics, health management, wellness, treatments, and everyday healthy living."
 
-        escaped_url_for_meta = ERB::Util.html_escape(url)
+        # META destination:
+        # - default: direct to target url
+        # - optional: second hop to /content?u=...&doredir=1, which then does HTTP 30x
+        meta_url =
+          if ::ContentRedirector.meta_second_hop_enabled?
+            "#{request.base_url}/content?u=#{ERB::Util.url_encode(params[:u].to_s)}&doredir=1"
+          else
+            url
+          end
+
+        escaped_meta_url = ERB::Util.html_escape(meta_url)
         escaped_message = ERB::Util.html_escape(message)
+
+        # Manual link destination follows the same URL as the meta refresh
+        show_link = ::ContentRedirector.meta_show_manual_link?
+
+        link_html = ""
+        if show_link
+          link_html = <<~LINKHTML
+            <div class="link">
+              If you are not redirected automatically,
+              <a href="#{escaped_meta_url}" rel="nofollow noopener">click here to continue</a>.
+            </div>
+          LINKHTML
+        end
 
         html = <<~HTML
           <!doctype html>
@@ -223,7 +288,7 @@ after_initialize do
               <meta http-equiv="Expires" content="0" />
               <meta name="viewport" content="width=device-width, initial-scale=1" />
               <meta name="referrer" content="no-referrer-when-downgrade">
-              <meta http-equiv="refresh" content="0;url=#{escaped_url_for_meta}">
+              <meta http-equiv="refresh" content="0;url=#{escaped_meta_url}">
               <title>Loading</title>
               <style>
                 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
@@ -238,10 +303,7 @@ after_initialize do
               <div class="wrap">
                 <div class="card">
                   <div class="msg">#{escaped_message}</div>
-                  <div class="link">
-                    If you are not redirected automatically,
-                    <a href="#{escaped_url_for_meta}" rel="nofollow noopener">click here to continue</a>.
-                  </div>
+                  #{link_html}
                 </div>
               </div>
             </body>
@@ -251,6 +313,7 @@ after_initialize do
         return render html: html.html_safe
       end
 
+      # Default: HTTP 30x
       status = (SiteSetting.content_redirector_http_status.to_i rescue 302)
       status = 302 unless (300..399).include?(status)
 
