@@ -1,37 +1,51 @@
 plugins:
+
   content_redirector_enabled:
-    default: true
+    default: false
     client: false
 
-  # "http" => standard 30x redirect
-  # "meta" => HTML page with META refresh (no JS)
+  # Redirect mode
+  # http  = direct HTTP redirect
+  # meta  = HTML page with META refresh
   content_redirector_redirect_mode:
     default: "http"
     client: false
-    type: enum
-    choices:
-      - "http"
-      - "meta"
 
-  # Used only when redirect_mode = "http"
-  # Allowed 300-399, otherwise code falls back to 302
+  # HTTP status used for server redirects
   content_redirector_http_status:
     default: 302
     client: false
-    type: integer
+
+  # -----------------------
+  # External logging
+  # -----------------------
 
   content_redirector_external_log_enabled:
     default: false
     client: false
 
-  # Example: https://yourdomain.com/logs/content_redirect_log.php
   content_redirector_external_log_endpoint:
     default: ""
     client: false
-    type: text
 
-  # Timeout for external log POST request
   content_redirector_external_log_timeout_ms:
     default: 1500
     client: false
-    type: integer
+
+  # -----------------------
+  # META redirect behavior
+  # -----------------------
+
+  # If enabled:
+  # /content?u=... will META refresh to
+  # /content?u=...&doredir=1
+  # and that second request performs the HTTP redirect
+  content_redirector_meta_second_hop_enabled:
+    default: false
+    client: false
+
+  # Show manual "click here to continue" link
+  # on the META redirect page
+  content_redirector_meta_show_manual_link:
+    default: true
+    client: false
