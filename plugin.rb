@@ -294,6 +294,7 @@ after_initialize do
                 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
                 .wrap { max-width: 900px; margin: 0 auto; padding: 28px 18px; }
                 .card { border: 1px solid rgba(0,0,0,0.12); border-radius: 12px; padding: 20px; }
+                .heading { font-size: 22px; font-weight: 600; margin-bottom: 12px; }
                 .msg { font-size: 18px; line-height: 1.5; }
                 .link { margin-top: 14px; font-size: 16px; }
                 .link a { word-break: break-word; }
@@ -302,6 +303,7 @@ after_initialize do
             <body>
               <div class="wrap">
                 <div class="card">
+                  <div class="heading">Redirecting... please wait</div>
                   <div class="msg">#{escaped_message}</div>
                   #{link_html}
                 </div>
